@@ -1,0 +1,96 @@
+In Super Metroid, speed booster is an item which lets you run faster than you previously could.  Speed builds slowly, maxing out after running about 50 tiles, compared with 6 tiles without speed booster.  Speed booster offers a second effect, the faster you are running the higher you can jump.  This is incredibly useful and used all throughout every speedrun category which picks it up.
+ 
+The most logical way for speed booster to add to your jump height would be for jump height to strictly increase the faster you are running.  Unfortunately, as the second chart shows, that is far from the case:
+ 
+https://imgur.com/a/VP5jP
+ 
+Through the rest of this piece, we will explain why this is the case and with our new understanding of why this happens, offer small changes which would remove all the dips from the graph.
+ 
+ 
+The dips with hi-jump equipped are surprising, but the dips without hi-jump are completely baffling.  Without hi-jump and a little bit of runspeed, Samus jumps *lower* than if dash was not held at all.  This dramatically impacts low% speed where you pick up speed booster, but not hi-jump.  In that situation, when a runner has to jump, they have to stop, let go of dash, walk to the right for a spinjump, then jump.  If dash is held, they often won’t get enough jump height and will have to try again.  Anyone who has played a rando where they got speed before hi-jump has been frustrated by this mechanic.
+ 
+We wanted to understand why this is so we sought out the code responsible for this jump height behavior.  After about 30 minutes of searching, we found it.  This routine is responsible for calculating Samus’ initial vertical speed when jumping.  After jumping, the vertical speed decreases linearly as gravity pulls Samus back to the ground.  Shown here is the piece of the routine which makes Samus jump higher when she has more runspeed.  At this point, the correct initial jump height (6.00 pixels per frame with hi-jump and 4.875 pixels per frame without hi-jump) has already been loaded.
+ 
+$909919 AD A2 09    LDA $09A2  [$7E:09A2]
+$90991C 89 00 20    BIT #$2000
+$90991F F0 19       BEQ $19    [$993A]
+$909921 AD 42 0B    LDA $0B42  [$7E:0B42]
+$909924 4A          LSR A
+$909925 85 12       STA $12    [$7E:0012]
+$909927 AD 2C 0B    LDA $0B2C  [$7E:0B2C]
+$90992A 18          CLC
+$90992B 6D 44 0B    ADC $0B44  [$7E:0B44]
+$90992E 8D 2C 0B    STA $0B2C  [$7E:0B2C]
+$909931 AD 2E 0B    LDA $0B2E  [$7E:0B2E]
+$909934 18          CLC
+$909935 65 12       ADC $12    [$7E:0012]
+$909937 8D 2E 0B    STA $0B2E  [$7E:0B2E]
+ 
+Breaking this down, piece by piece
+ 
+$909919 AD A2 09    LDA $09A2  [$7E:09A2]
+$90991C 89 00 20    BIT #$2000
+$90991F F0 19       BEQ $19    [$993A]
+ 
+Only execute the code for adding jump height if speedbooster is equipped.  $09A2 is the memory address which maintains which items are equipped and #$2000 is the bit for speed booster.
+ 
+$909921 AD 42 0B    LDA $0B42  [$7E:0B42]
+$909924 4A          LSR A
+$909925 85 12       STA $12    [$7E:0012]
+ 
+Divide the horizontal speed in pixels ($0B42) by two, rounded down, and store it in a temporary address.  The rest of the routine, as written, would work perfectly fine without needing to use a temporary address so the existence of this suggests that at one point Deer Force (the team who made Super Metroid) was planning on doing a better job of making Samus jump higher the faster she is running.
+ 
+For the next section, it’s important to understand how multi word addition works on the SNES.  Samus’ speed exists as a speed for pixels per frame and a speed for subpixels per frame.  When the subpixel speed overflows (ie. increases enough that the pixel speed should increase), a carry bit will be set.  With the carry bit set, any addition will add an extra 1 to the final value.  For example, we want 0.9 pixels/frame + 0.2 pixels/frame to give 1.1 pixels/frame.  The way this is done in SNES assembly is to add the subpixels (0.9 + 0.2 = 0.1) and the carry bit will be set.  After that, the pixels/frame value can be added to 0 (0 + 0 + carry bit = 1) , giving the correct value of 1.1.  
+ 
+When doing addition, it is typical to unset the carry bit (CLC = clear carry bit) with the exception of doing multi word arithmetic such as on subpixel and pixel speed.
+ 
+$909927 AD 2C 0B    LDA $0B2C  [$7E:0B2C]
+$90992A 18          CLC
+$90992B 6D 44 0B    ADC $0B44  [$7E:0B44]
+$90992E 8D 2C 0B    STA $0B2C  [$7E:0B2C]
+ 
+Add Samus’ vertical subpixel speed ($0B2C) with Samus’ horizontal subpixel speed ($0B44) and store it as Samus’ vertical subpixel speed.  When the addition of subpixel speed overflows, the fractional pixels/frame speed will be stored in subpixels and the carry bit will be set, suggesting the speed in pixels/frame should be increased.
+ 
+$909931 AD 2E 0B    LDA $0B2E  [$7E:0B2E]
+$909934 18          CLC
+$909935 65 12       ADC $12    [$7E:0012]
+$909937 8D 2E 0B    STA $0B2E  [$7E:0B2E]
+ 
+This adds Samus’ horizontal speed in pixels (temp variable in $12) to Samus’ vertical speed in pixels ($0B2E).  Remember how horizontal speed was divided by two then *rounded down*?  This creates a scenario where increased in pixels/frame from even to odd numbers (0->1, 2->3, 4->5) do not increase jump height.  At these transitions, subpixel speed drops from a high value to 0.  This results in the drop in jump height with hi-jump boots and the drops without hi-jump boots immediately below them in the graph.  The end result is that Samus’ jump height is lower and will not reach the same jump height until run speed is ~0.99 pixels/frame faster.
+ 
+ 
+ 
+That explains why the jump height graph with hi-jump has decreases, but doesn’t explain why Samus’ jump height without hi-jump can be lower with speed booster than without.  For this, we need to look at the single most perplexing line of code from this routine:
+ 
+$909934 18          CLC
+ 
+In almost any situation, we would expect subpixel speed overflowing to cause the pixel speed to increase.  For whatever reason, Deer Force decided that should not be the case here.  KatDevsGames@ thinks someone on Deer Force used an ADD pseudoinstruction which expanded to CLC : ADC.    We agree with this assessment.  In most cases, this would be the correct way to do addition, but in this case, we actually want to use the carry bit.
+ 
+Subpixels range from 0-65535, the range of values for a 16 bit integer.  With hi-jump equipped, Samus’ initial vertical speed is 6.00.  The base subpixel speed being 0 ensures there will never be a carry to worry about when hi-jump is equipped and mitigates damage caused by this CLC.  
+ 
+Without, hi-jump, Samus’ initial vertical speed is 4 pixels/frame, 57344 subpixels/frame.  This means that when Samus’ horizontal speed hits 0 pixels/frame, 8192 subpixels/frame, her jump height will be *lower* than if she had no runspeed.  In this case, the calculation looks like:
+ 
+57344 + 8192 = 1 pixel/frame, 0 subpixels/frame (the logical result of adding subpixels like this)
+ 
+Here, the carry bit would be set.  Without the carry bit being cleared, we would see:
+ 
+4 + 0 + carry bit = 5 pixels/frame, a higher jump than without speed booster
+ 
+With the carry bit cleared, we see:
+ 
+4 + 0 + carry bit = 4 pixels/frame, resulting in a lower jump than without speed booster
+ 
+ 
+The end result is that single instruction to clear the carry bit means Samus’ jump height is often lower with speed booster than without when hi-jump is not equipped.  This is the cause of the remaining dips in the graph.  The weird peaks in the graph without hi-jump are where Samus’ horizontal subpixel speed is between 0 and 8192.
+ 
+ 
+ 
+We will never know why Deer Force decided to code speed booster’s additional jump height like this, but their use of a temporary variable suggests they attempted to code this more gracefully at one point.  This leaves us with the question of what could be done to improve this.  
+ 
+For a simple solution, remove the last CLC by replacing it with a no-op.  This can be done in a hex editor, by modifying a single byte ($909934 -> EA).  This will make jump height without hi-jump behave like jump height with hi-jump and will not change the behavior of jump height with hi-jump.
+ 
+To fix, the dips in the hi-jump graph, we would need to divide horizontal speed by two and not round down.  If speed in pixels/frame is odd, we need to add 0.5 pixels/frame to the initial jump height.  This could be achieved by adding 32768 subpixels/frame to the initial jump height.  In addition to this, subpixel speed would need to be divided by two before the 32768 subpixels/frame are added.  If we halve the speed in pixels, but don’t halve the speed in subpixels, there will be continue to be dips in the graph.  Additional changes would need to be made to ensure Samus’ maximum jump height isn’t increased.  This would be possible, but care would be needed to do it well.
+ 
+ 
+ 
+Together, these two changes would make the jump height increase by speed booster increase linearly from no runspeed to max runspeed without any dips in the graph.

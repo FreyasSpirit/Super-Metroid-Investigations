@@ -1,0 +1,25 @@
+Normally, when you hit phantoon with a super missile, phantoon will become enraged and enter a 17 second attack where samus cannot deal any damage.  In a speedrun, this is heavily avoided and an enrage typically means the run is instantly reset.  The phantoon magic frame is a frame where phantoon can be hit with a super and not become enraged.  This makes killing phantoon in a single round possible for humans to do in runs (though still incredibly difficult).  This would eliminate about a third of the rng in the run.  It also saves 40 frames in TASes.
+
+Phantoon’s main AI loop has the following code which branches to different places depending on what AI state phantoon is in:
+
+$A7:DDE3 BD B2 0F    LDA $0FB2,x[$7E:0FB2]
+$A7:DDE6 C9 0D D6    CMP #$D60D
+$A7:DDE9 F0 43       BEQ $43    [$DE2E]
+$A7:DDEB C9 88 D7    CMP #$D788
+$A7:DDEE F0 3E       BEQ $3E    [$DE2E]
+$A7:DDF0 C9 78 D6    CMP #$D678
+$A7:DDF3 F0 03       BEQ $03    [$DDF8]
+
+$A7:DDF5 4C 92 DE    JMP $DE92  [$A7:DE92]
+
+If we are in AI states D60D, D788, and D678 (these are function pointers), then we branch to DE2E or DDF8.  Code is duplicated at both of these locations so the same bit of code is executed for any of those AI states.  Included in this is the check for whether phantoon has been hit by a super missile and should enter an enraged state:
+
+$A7:DE40 B9 18 0C    LDA $0C18,y
+$A7:DE43 29 00 0F    AND #$0F00
+$A7:DE46 C9 00 02    CMP #$0200
+$A7:DE49 D0 03       BNE $03    [$DE4E]
+$A7:DE4B 4C D5 DE    JMP $DED5  [$A7:DED5]
+
+The data about the type of projectiles on screen is at $0C18.  X2XX is a super missile so the AND and CMP tests whether the ammo type is a super.  If it is a super, jump to $DED5 and enter the enrage state.  
+
+The frame before phantoon starts to move, phantoon calculates how to move based on the positions of samus and phantoon.  During this frame, phantoon is in AI state D65C (TODO: verify this is the case) which means that we jump to the fallthrough case, $DE92, rather than any of the code which checks for enrages.  The way the code is written, deerforce had to enumerate all AI states where they want to check for enrages and any AI states not explicitly listed would skip the enrage check.  It’s honestly impressive that out of all of phantoon’s AI states, there is exactly one frame where the check for enrages is skipped.
